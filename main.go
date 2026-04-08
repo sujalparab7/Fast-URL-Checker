@@ -140,34 +140,57 @@ func main() {
 		"https://invalid-url-example57.com",
 	}
 
-	var wg sync.WaitGroup
+	fmt.Printf("Beginning diagnostics for %d URLs...\n\n", len(urls))
+
+	// 1. MEASURE SEQUENTIAL EXECUTION
+	// ---------------------------------------------------------
+	fmt.Println("--- Starting Sequential Execution ---")
+	startSeq := time.Now()
 	
-	resultsChan := make(chan Result, len(urls))
-
-	fmt.Printf("Checking %d URLs with WaitGroup...\n\n", len(urls))
-
-	for _, url := range urls {
-		wg.Add(1)
-		
-		go func(u string) {
-			defer wg.Done()
-			
-			resultsChan <- checkUrl(u)
-		}(url) 
-	}
-
-	go func() {
-		wg.Wait() 
-		close(resultsChan) 
-	}()
-
-	for res := range resultsChan {
+	for _, u := range urls {
+		res := checkUrl(u)
+		// Only printing errors to keep the terminal output manageable 
 		if res.Error != nil {
-			fmt.Printf("[Error] %s - %s\n", res.URL, res.Error)
-		} else {
-			fmt.Printf("[%d] %s - took %v\n", res.Status, res.URL, res.Latency)
+			fmt.Printf("[Seq Error] %s failed\n", res.URL)
 		}
 	}
 	
-	fmt.Println("\nAll checks completed.")
+	elapsedSeq := time.Since(startSeq)
+	fmt.Printf("Sequential execution took: %v\n\n", elapsedSeq)
+
+	// 2. MEASURE CONCURRENT EXECUTION
+	// ---------------------------------------------------------
+	fmt.Println("--- Starting Concurrent Execution ---")
+	startConc := time.Now()
+	
+	var wg sync.WaitGroup
+	resultsChan := make(chan Result, len(urls))
+
+	for _, url := range urls {
+		wg.Add(1)
+		go func(u string) {
+			defer wg.Done()
+			resultsChan <- checkUrl(u)
+		}(url)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
+
+	// Drain the channel to ensure all goroutines finish
+	for res := range resultsChan {
+		if res.Error != nil {
+			fmt.Printf("[Conc Error] %s failed\n", res.URL)
+		}
+	}
+	
+	elapsedConc := time.Since(startConc)
+	fmt.Printf("Concurrent execution took: %v\n\n", elapsedConc)
+
+	// 3. CALCULATE THE DIFFERENCE
+	// ---------------------------------------------------------
+	speedup := float64(elapsedSeq) / float64(elapsedConc)
+	fmt.Printf(" RESULT: Concurrency was %.2f times faster!\n", speedup)
 }
